@@ -1,0 +1,98 @@
+#!/bin/bash
+# Antigravity 自动重试 - 管理命令
+# 守望器已合并进菜单栏应用 AntigravityRetry.app（守望引擎 + 菜单栏 UI + 网页控制台一体化）。
+#
+#   antigravity-auto-retry status   查看运行状态和最近日志
+#   antigravity-auto-retry scan     立即扫描诊断一次（结果写入日志）
+#   antigravity-auto-retry pause    暂停自动点击（守望继续运行）
+#   antigravity-auto-retry resume   恢复自动点击
+#   antigravity-auto-retry restart  重启应用（同时清零重试计数/提前结束冷却）
+#   antigravity-auto-retry start    启动（一般无需使用，已由 LaunchAgent 管理）
+#   antigravity-auto-retry stop     停止应用（launchd 会自动拉起；彻底停用用 unload）
+#   antigravity-auto-retry ui       打开浏览器控制台 (http://127.0.0.1:17377)
+#   antigravity-auto-retry logs     实时查看日志
+#   antigravity-auto-retry unload   彻底停用并注销开机自启
+#   antigravity-auto-retry load     重新注册开机自启
+
+set -u
+
+STATE_DIR="$HOME/Library/Application Support/AntigravityAutoRetry"
+PID_FILE="$STATE_DIR/antigravity-auto-retry.pid"
+PAUSE_FILE="$STATE_DIR/antigravity-auto-retry.pause"
+DIAG_FILE="$STATE_DIR/diag.now"
+LOG_FILE="$STATE_DIR/antigravity-auto-retry.log"
+PLIST="$HOME/Library/LaunchAgents/com.local.antigravity-retry.plist"
+LABEL="com.local.antigravity-retry"
+
+mkdir -p "$STATE_DIR"
+
+is_running() {
+  [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null
+}
+
+agent_loaded() {
+  launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1
+}
+
+case "${1:-status}" in
+  start)
+    if is_running; then echo "已在运行 (pid $(cat "$PID_FILE"))"; exit 0; fi
+    launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null || launchctl kickstart -k "gui/$(id -u)/$LABEL"
+    sleep 1
+    is_running && echo "已启动 (pid $(cat "$PID_FILE"))" || { echo "启动失败，见 $STATE_DIR/app.err"; exit 1; }
+    ;;
+  stop)
+    if is_running; then kill "$(cat "$PID_FILE")" 2>/dev/null; echo "已停止（launchd 会自动拉起）"; else echo "未在运行"; fi
+    ;;
+  status)
+    if is_running; then
+      echo "运行中 (pid $(cat "$PID_FILE"))  控制台: http://127.0.0.1:17377"
+    elif agent_loaded; then
+      echo "未在运行，但 LaunchAgent 已注册（可能缺少辅助功能权限或启动异常）"
+    else
+      echo "未在运行"
+    fi
+    [ -f "$PAUSE_FILE" ] && echo "状态: 已暂停自动点击 (resume 恢复)"
+    [ -f "$LOG_FILE" ] && echo "--- 最近日志 ---" && tail -n 10 "$LOG_FILE"
+    true
+    ;;
+  scan)
+    touch "$DIAG_FILE"
+    echo "已触发扫描诊断（由守望应用执行），等待结果…"
+    sleep 6
+    tail -n 15 "$LOG_FILE"
+    ;;
+  pause)
+    touch "$PAUSE_FILE"
+    echo "已暂停自动点击（守望进程保持运行）"
+    ;;
+  resume)
+    rm -f "$PAUSE_FILE"
+    echo "已恢复自动点击"
+    ;;
+  restart)
+    launchctl kickstart -k "gui/$(id -u)/$LABEL"
+    sleep 1
+    is_running && echo "已重启 (pid $(cat "$PID_FILE"))，重试计数与冷却已清零"
+    ;;
+  ui)
+    open "http://127.0.0.1:17377"
+    ;;
+  logs)
+    [ -f "$LOG_FILE" ] || { echo "暂无日志"; exit 0; }
+    tail -n 40 -f "$LOG_FILE"
+    ;;
+  unload)
+    launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null
+    is_running && kill "$(cat "$PID_FILE")" 2>/dev/null
+    rm -f "$PID_FILE"
+    echo "已彻底停用（plist 保留在 $PLIST，执行 load 可重新启用）"
+    ;;
+  load)
+    launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null || launchctl load "$PLIST"
+    echo "已注册开机自启"
+    ;;
+  *)
+    grep -E '^#   ' "$0" | sed 's/^#   //'
+    ;;
+esac
