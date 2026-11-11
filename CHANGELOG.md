@@ -38,3 +38,26 @@
   Finder 自定义图标方案（`Icon\r` + `SetFile -a C`）而非改动 bundle 内容。
 - 图像工具默认会写入时间戳元数据，导致每次重跑生成的 base64 不同；
   `regenerate-icons.sh` 统一加 `-strip` 保证输出确定、可重复。
+
+## 2026-11-11（续）— 退出被守护拉回、多实例重复守望
+
+装好 `KeepAlive` 守护后又发现两个交互问题，一并修复。
+
+### 修复
+
+- **「退出」能真正退出了**：菜单栏按钮原先只调 `NSApp.terminate(nil)`，
+  进程退出后 launchd 立刻拉起，表现为「关不掉」、日志里 `runs` 持续增长。
+  新增 `AppStatus.quitApp()`：先同步执行
+  `launchctl bootout gui/<uid>/com.local.antigravity-retry` 卸载服务再退出；
+  只卸载、保留 plist，下次登录仍按开机自启设置启动。卸载失败会写日志提示。
+- **不再出现第二个守望引擎**：`startPosixHttp()` 原先在子线程里 bind，
+  失败仅 `return`，进程仍继续跑守望循环、写 pid 文件、占菜单栏——
+  即「没有控制台、却仍在自动点击」的僵尸实例。改为启动期同步 bind/listen
+  并返回 `Bool`，`RetryApp.init()` 在绑定失败时写日志后 `exit(0)`，
+  只有成功持有 17377 的实例才启动 `Engine.shared`。
+
+### 新增
+
+- `scripts/stop-daemon.sh`：手动停止守护（bootout + 状态回显），
+  旧版本二进制没有内置退出修复时用它。
+- README 增补「退出与单实例」章节，列出停止 / 禁用 / 恢复命令。

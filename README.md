@@ -102,6 +102,25 @@ launchctl kickstart -k gui/$(id -u)/com.local.antigravity-retry
 launchctl print gui/$(id -u)/com.local.antigravity-retry
 ```
 
+## 退出与单实例
+
+`KeepAlive=true` 意味着**直接结束进程会被 launchd 在约 10 秒内拉回**，
+所以菜单栏「退出」按钮会先 `launchctl bootout` 卸载服务再 `NSApp.terminate`；
+只卸载、不删 plist，下次登录仍按开机自启设置启动。旧版本没有这个处理，
+需要手动停止时：
+
+```bash
+./scripts/stop-daemon.sh                                       # 停止守护（推荐）
+launchctl bootout gui/$(id -u)/com.local.antigravity-retry    # 同上，仅本次会话停用
+launchctl disable gui/$(id -u)/com.local.antigravity-retry    # 连下次登录也禁用
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.local.antigravity-retry.plist  # 恢复
+```
+
+单实例保护：启动时同步抢占 17377 端口，绑定失败即写日志并 `exit(0)`，
+**不会启动第二个守望引擎**（旧版本绑定失败后仍会跑守望循环并覆盖 pid 文件，
+造成两个进程同时自动点击）。因此不要同时打开多个副本；要换用新构建的版本，
+先 `stop-daemon.sh` 停掉守护，再安装/启动新 App。
+
 ## 权限
 
 App 需要辅助功能权限才能读取/点击 Antigravity 界面：

@@ -326,25 +326,37 @@ final class Engine {
 
 // ---------- HTTP 控制台服务器 (POSIX socket, 127.0.0.1:17377) ----------
 
-func startPosixHttp(port: UInt16, handler: @escaping (String, String, Data) -> (Int, String, Data)) {
+/// 同步创建并监听控制台端口；返回 false 表示端口已被占用（通常说明已有实例在运行）。
+/// 绑定必须在启动期同步完成：只有成功持有端口的实例才允许启动守望引擎，
+/// 否则会出现「没有控制台、却仍在自动点击」的第二个守望器，并互相覆盖 pid 文件。
+@discardableResult
+func startPosixHttp(port: UInt16, handler: @escaping (String, String, Data) -> (Int, String, Data)) -> Bool {
     signal(SIGPIPE, SIG_IGN)
-    Thread {
-        let serverFD = socket(AF_INET, SOCK_STREAM, 0)
-        guard serverFD >= 0 else { appendLog("控制台 socket 创建失败 errno=\(errno)"); return }
-        var yes: Int32 = 1
-        setsockopt(serverFD, SOL_SOCKET, SO_REUSEADDR, &yes, socklen_t(MemoryLayout<Int32>.size))
-        var addr = sockaddr_in()
-        addr.sin_family = sa_family_t(AF_INET)
-        addr.sin_port = port.bigEndian
-        addr.sin_addr.s_addr = UInt32(INADDR_LOOPBACK).bigEndian
-        let bindOK = withUnsafePointer(to: &addr) {
-            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                bind(serverFD, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
-            }
+    let serverFD = socket(AF_INET, SOCK_STREAM, 0)
+    guard serverFD >= 0 else { appendLog("控制台 socket 创建失败 errno=\(errno)"); return false }
+    var yes: Int32 = 1
+    setsockopt(serverFD, SOL_SOCKET, SO_REUSEADDR, &yes, socklen_t(MemoryLayout<Int32>.size))
+    var addr = sockaddr_in()
+    addr.sin_family = sa_family_t(AF_INET)
+    addr.sin_port = port.bigEndian
+    addr.sin_addr.s_addr = UInt32(INADDR_LOOPBACK).bigEndian
+    let bindOK = withUnsafePointer(to: &addr) {
+        $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+            bind(serverFD, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
         }
-        guard bindOK == 0 else { appendLog("控制台端口 \(port) 绑定失败 errno=\(errno)"); close(serverFD); return }
-        guard listen(serverFD, 16) == 0 else { appendLog("控制台 listen 失败 errno=\(errno)"); close(serverFD); return }
-        appendLog("控制台已启动 http://127.0.0.1:\(port)")
+    }
+    guard bindOK == 0 else {
+        appendLog("控制台端口 \(port) 绑定失败 errno=\(errno)（已有实例在运行？）")
+        close(serverFD)
+        return false
+    }
+    guard listen(serverFD, 16) == 0 else {
+        appendLog("控制台 listen 失败 errno=\(errno)")
+        close(serverFD)
+        return false
+    }
+    appendLog("控制台已启动 http://127.0.0.1:\(port)")
+    Thread {
         while true {
             var clientAddr = sockaddr()
             var len = socklen_t(MemoryLayout<sockaddr>.size)
@@ -353,6 +365,7 @@ func startPosixHttp(port: UInt16, handler: @escaping (String, String, Data) -> (
             Thread { handleClient(client, handler: handler) }.start()
         }
     }.start()
+    return true
 }
 
 private func handleClient(_ fd: Int32, handler: @escaping (String, String, Data) -> (Int, String, Data)) {
@@ -646,6 +659,25 @@ final class AppStatus: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { self.refresh() }
     }
 
+    /// 真正退出：LaunchAgent 带 KeepAlive，直接 terminate 会在 10 秒内被 launchd 拉回来。
+    /// 先 bootout 卸载服务再退出；只卸载、不删 plist，下次登录仍按开机自启设置启动。
+    func quitApp() {
+        if launchAgentActive() {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+            p.arguments = ["bootout", "gui/\(getuid())/\(agentLabel)"]
+            if (try? p.run()) != nil {
+                p.waitUntilExit()
+                appendLog(p.terminationStatus == 0
+                          ? "退出：已卸载 LaunchAgent（plist 保留，下次登录自动启动）"
+                          : "退出：LaunchAgent 卸载失败，进程可能仍会被自动拉起")
+            } else {
+                appendLog("退出：无法执行 launchctl，进程可能仍会被自动拉起")
+            }
+        }
+        NSApp.terminate(nil)
+    }
+
     func restartDaemon() {
         var viaLaunchd = false
         let p = Process()
@@ -756,7 +788,7 @@ struct ContentView: View {
                 Button("日志文件") { s.revealLog() }
                 Button(s.loginItemOn ? "开机自启: 开" : "开机自启: 关") { s.toggleLoginItem() }
                 Spacer()
-                Button("退出") { NSApp.terminate(nil) }
+                Button("退出") { s.quitApp() }
             }
         }
         .padding(12)
@@ -800,8 +832,13 @@ struct RetryApp: App {
     @StateObject private var status = AppStatus()
 
     init() {
+        // 先同步抢占控制台端口：抢不到说明已有实例在服务，本实例立即退出，
+        // 避免启动第二个守望引擎（重复自动点击、互相覆盖 pid 文件）。
+        guard startPosixHttp(port: 17377, handler: makeHandler()) else {
+            appendLog("已有 AntigravityRetry 实例在运行，本实例退出（不会启动第二个守望引擎）")
+            exit(0)
+        }
         Engine.shared.start()
-        startPosixHttp(port: 17377, handler: makeHandler())
     }
 
     var body: some Scene {
