@@ -31,9 +31,12 @@ build_universal "$STAGE/axhelper" "$SRC/axhelper.swift"
 echo "==> 编译主程序（通用二进制）"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 build_universal_lib "$APP/Contents/MacOS/AntigravityRetry" \
-  "$SRC/antigravity-retry-app.swift" "$SRC/page-html.swift"
+  "$SRC/antigravity-retry-app.swift" "$SRC/page-html.swift" "$SRC/assets/AppIconData.swift"
 mv "$STAGE/axhelper" "$APP/Contents/Resources/axhelper"
 chmod +x "$APP/Contents/Resources/axhelper"
+
+echo "==> 放入 App 图标"
+cp "$SRC/assets/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 
 echo "==> 写入 Info.plist 并签名"
 cat > "$APP/Contents/Info.plist" <<'EOF'
@@ -47,6 +50,7 @@ cat > "$APP/Contents/Info.plist" <<'EOF'
 	<key>CFBundleVersion</key><string>1.1</string>
 	<key>CFBundleShortVersionString</key><string>1.1</string>
 	<key>CFBundleExecutable</key><string>AntigravityRetry</string>
+	<key>CFBundleIconFile</key><string>AppIcon</string>
 	<key>CFBundlePackageType</key><string>APPL</string>
 	<key>LSUIElement</key><true/>
 	<key>NSPrincipalClass</key><string>NSApplication</string>

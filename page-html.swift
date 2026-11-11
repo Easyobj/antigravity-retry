@@ -5,13 +5,16 @@ let pageHTML = #"""
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Antigravity 自动重试控制台</title>
+<link rel="icon" type="image/png" href="\#(faviconDataURI)">
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
   body { margin: 0; background: #0d1117; color: #e6edf3;
          font: 14px/1.6 -apple-system, "PingFang SC", "Helvetica Neue", sans-serif; }
   .wrap { max-width: 960px; margin: 0 auto; padding: 20px 16px 40px; }
-  h1 { font-size: 18px; margin: 0 0 4px; }
+  .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 4px; }
+  .brand img { width: 40px; height: 40px; border-radius: 9px; flex: none; }
+  h1 { font-size: 18px; margin: 0; }
   .sub { color: #8b949e; font-size: 12px; margin-bottom: 16px; }
   .badges { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 10px 0 18px; }
   .badge { padding: 3px 12px; border-radius: 999px; font-size: 13px; border: 1px solid #30363d; }
@@ -50,7 +53,10 @@ let pageHTML = #"""
 </head>
 <body>
 <div class="wrap">
-  <h1>Antigravity 自动重试控制台</h1>
+  <div class="brand">
+    <img src="\#(faviconDataURI)" alt="Antigravity 自动重试">
+    <h1>Antigravity 自动重试控制台</h1>
+  </div>
   <div class="sub">守望器每 3 秒扫描一次 agent 面板；10 分钟内最多自动重试 6 次，超过冷却 15 分钟</div>
   <div class="badges" id="badges"></div>
   <div class="row" style="margin-bottom:16px">
@@ -71,7 +77,7 @@ let pageHTML = #"""
   </div>
   <div class="sub" style="margin-top:14px">
     状态文件: ~/Library/Application Support/AntigravityAutoRetry/ ｜
-    服务: launchctl print gui/$UID/com.local.antigravity-auto-retry
+    服务: launchctl print gui/$UID/com.local.antigravity-retry
   </div>
 </div>
 <div class="toast" id="toast"></div>

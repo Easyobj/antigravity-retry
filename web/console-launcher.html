@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Antigravity 自动重试 · 控制台</title>
+<link rel="icon" type="image/png" href="favicon.png">
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #0d1117; color: #e6edf3;
+         font: 14px/1.6 -apple-system, "PingFang SC", "Helvetica Neue", sans-serif; }
+  header { display: flex; align-items: center; gap: 14px; height: 68px;
+           padding: 0 20px; background: #111823; border-bottom: 1px solid #21262d; }
+  header img { width: 40px; height: 40px; border-radius: 9px; flex: none; }
+  .title { flex: 1; min-width: 0; }
+  h1 { margin: 0; font-size: 15px; font-weight: 500; }
+  .sub { margin: 0; font-size: 12px; color: #8b949e; }
+  .status { font-size: 12px; padding: 3px 12px; border-radius: 999px;
+            border: 1px solid #30363d; color: #8b949e; white-space: nowrap; }
+  .status.ok { background: #12321f; color: #3fb950; border-color: #1f6f37; }
+  .status.err { background: #3a1216; color: #f85149; border-color: #b62324; }
+  .btn { font-size: 13px; color: #e6edf3; text-decoration: none; padding: 6px 14px;
+         border: 1px solid #363b42; border-radius: 6px; background: #21262d; white-space: nowrap; }
+  .btn:hover { background: #30363d; }
+  iframe { display: block; width: 100%; height: calc(100vh - 68px); border: 0; }
+  .hint { display: none; padding: 24px; color: #8b949e; font-size: 13px; }
+  @media (max-width: 560px) { .sub, .status { display: none; } }
+</style>
+</head>
+<body>
+<header>
+  <img src="favicon.png" alt="Antigravity 自动重试">
+  <div class="title">
+    <h1>Antigravity 自动重试</h1>
+    <p class="sub">控制台 · 127.0.0.1:17377</p>
+  </div>
+  <span class="status" id="status">连接中</span>
+  <a class="btn" href="http://127.0.0.1:17377/" target="_blank" rel="noopener">新标签打开</a>
+</header>
+<iframe id="frame" src="http://127.0.0.1:17377/" title="Antigravity 自动重试控制台"></iframe>
+<div class="hint" id="hint">若下方空白，请点右上角「新标签打开」，或确认守望器已启动。</div>
+<script>
+  var frame = document.getElementById('frame');
+  var status = document.getElementById('status');
+  var settled = false;
+  function online() {
+    settled = true;
+    status.textContent = '在线';
+    status.className = 'status ok';
+  }
+  function offline() {
+    settled = true;
+    status.textContent = '离线';
+    status.className = 'status err';
+    document.getElementById('hint').style.display = 'block';
+  }
+  frame.addEventListener('load', online);
+  frame.addEventListener('error', offline);
+  setTimeout(function () {
+    if (!settled) {
+      status.textContent = '等待响应';
+      status.className = 'status';
+      document.getElementById('hint').style.display = 'block';
+    }
+  }, 6000);
+</script>
+</body>
+</html>

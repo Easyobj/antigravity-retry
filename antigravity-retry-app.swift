@@ -25,6 +25,7 @@ let diagPath = stateDir + "/diag.now"
 let pidPath = stateDir + "/antigravity-auto-retry.pid"
 let logPath = stateDir + "/antigravity-auto-retry.log"
 let agentLabel = "com.local.antigravity-retry"
+let agentPlistPath = NSString(string: "~/Library/LaunchAgents/com.local.antigravity-retry.plist").expandingTildeInPath
 let consoleURL = URL(string: "http://127.0.0.1:17377")!
 
 let targets: [(name: String, bundleId: String)] = [
@@ -37,7 +38,7 @@ let afterClickSec: TimeInterval = 8
 let capWindowMs: Double = 10 * 60 * 1000
 let capMaxClicks = 6
 let capCooldownSec: TimeInterval = 15 * 60
-let restartAfterMs: Double = 2 * 60 * 60 * 1000 // 每 2 小时自杀一次，由 launchd 拉起
+let restartAfterMs: Double = 2 * 60 * 60 * 1000 // 每 2 小时自检一次；仅当 LaunchAgent 已注册时退出，交由 launchd 拉起
 
 let fm = FileManager.default
 
@@ -82,6 +83,19 @@ func notify(_ msg: String) {
     try? p.run()
 }
 
+// ---------- LaunchAgent ----------
+
+func launchAgentActive() -> Bool {
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+    p.arguments = ["print", "gui/\(getuid())/\(agentLabel)"]
+    p.standardOutput = Pipe()
+    p.standardError = Pipe()
+    guard (try? p.run()) != nil else { return false }
+    p.waitUntilExit()
+    return p.terminationStatus == 0
+}
+
 // ---------- 守望引擎 ----------
 
 final class Engine {
@@ -92,7 +106,7 @@ final class Engine {
     private var lastAuthLog: Double = 0
     private var lastBeat: Double = 0
     private var treeNotified = false
-    private let startedAt = Date().timeIntervalSince1970 * 1000
+    private var startedAt = Date().timeIntervalSince1970 * 1000
     private var lastResults: [String: Any] = [:]
 
     func start() {
@@ -105,8 +119,12 @@ final class Engine {
         appendLog("守望器启动 (pid \(ProcessInfo.processInfo.processIdentifier), 一体化版)")
         while true {
             if Date().timeIntervalSince1970 * 1000 - startedAt > restartAfterMs {
-                appendLog("定时自检重启")
-                exit(0)
+                if launchAgentActive() {
+                    appendLog("定时自检重启")
+                    exit(0)
+                }
+                appendLog("定时自检重启已跳过：LaunchAgent 未注册，保持进程运行")
+                startedAt = Date().timeIntervalSince1970 * 1000
             }
             if fm.fileExists(atPath: diagPath) { processDiag() }
 
@@ -571,7 +589,7 @@ final class AppStatus: ObservableObject {
     }
 
     func launchAgentInstalled() -> Bool {
-        fm.fileExists(atPath: NSString(string: "~/Library/LaunchAgents/com.local.antigravity-retry.plist").expandingTildeInPath)
+        fm.fileExists(atPath: agentPlistPath)
     }
 
     func toggleLoginItem() {
@@ -580,7 +598,7 @@ final class AppStatus: ObservableObject {
             p.executableURL = URL(fileURLWithPath: "/bin/launchctl")
             p.arguments = ["bootout", "gui/\(getuid())/\(agentLabel)"]
             try? p.run()
-            try? fm.removeItem(atPath: NSString(string: "~/Library/LaunchAgents/com.local.antigravity-retry.plist").expandingTildeInPath)
+            try? fm.removeItem(atPath: agentPlistPath)
         } else if SMAppService.mainApp.status == .enabled || SMAppService.mainApp.status == .requiresApproval {
             try? SMAppService.mainApp.unregister()
         } else {
@@ -598,15 +616,29 @@ final class AppStatus: ObservableObject {
         <?xml version="1.0" encoding="UTF-8"?>
         <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
         <plist version="1.0">
-        <dict><key>Label</key><string>\(agentLabel)</string><key>ProgramArguments</key><array><string>\(exe)</string></array><key>RunAtLoad</key><true/><key>KeepAlive</key><true/></dict>
+        <dict>
+          <key>Label</key><string>\(agentLabel)</string>
+          <key>ProgramArguments</key><array><string>\(exe)</string></array>
+          <key>RunAtLoad</key><true/>
+          <key>KeepAlive</key><true/>
+          <key>ThrottleInterval</key><integer>10</integer>
+          <key>StandardOutPath</key><string>\(stateDir)/launchd.out.log</string>
+          <key>StandardErrorPath</key><string>\(stateDir)/launchd.err.log</string>
+        </dict>
         </plist>
         """
-        let path = dir + "/com.local.antigravity-retry.plist"
-        fm.createFile(atPath: path, contents: plist.data(using: .utf8))
+        fm.createFile(atPath: agentPlistPath, contents: plist.data(using: .utf8))
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-        p.arguments = ["bootstrap", "gui/\(getuid())", path]
-        try? p.run()
+        p.arguments = ["bootstrap", "gui/\(getuid())", agentPlistPath]
+        p.standardOutput = Pipe()
+        p.standardError = Pipe()
+        if (try? p.run()) != nil {
+            p.waitUntilExit()
+            if p.terminationStatus != 0 {
+                appendLog("已写入 LaunchAgent plist；当前会话注册失败，下次登录自动生效")
+            }
+        }
     }
 
     func pauseToggle() {
