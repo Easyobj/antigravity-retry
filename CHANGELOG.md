@@ -61,3 +61,13 @@
 - `scripts/stop-daemon.sh`：手动停止守护（bootout + 状态回显），
   旧版本二进制没有内置退出修复时用它。
 - README 增补「退出与单实例」章节，列出停止 / 禁用 / 恢复命令。
+
+## 2026-11-12 — 修正 stop-daemon.sh 的变量解析
+
+- 直接执行脚本时 `set -u` 报 `LABEL…: unbound variable`：
+  `echo "已卸载 $LABEL：进程已停止…"` 中 `$LABEL` 紧跟全角冒号，
+  部分 shell 会把多字节字符并入变量名。全部变量引用改为 `${VAR}`，
+  并抽出 `SERVICE="${DOMAIN}/${LABEL}"` 常量避免重复拼接。
+- 已验证 `bash -n`、直接执行、`zsh` 强制解释、`bash` 四种方式均正常退出且输出一致。
+- 语义不变：只 `bootout` 卸载服务、保留 plist，因此**下次登录仍会自启**；
+  需永久停用要额外执行 `launchctl disable`（或移除 plist）。
